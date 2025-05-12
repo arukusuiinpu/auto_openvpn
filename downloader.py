@@ -194,7 +194,7 @@ def download_config(args):
         r = requests.get(url, headers=DEFAULT_HEADERS, timeout=10)
         r.raise_for_status()
     except requests.RequestException as e:
-        sys.exit(f"Error downloading {url}: {e}")
+        print(f"Error downloading {url}: {e}")
 
     with open(outpath, "wb") as f:
         f.write(r.content)
