@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 import datetime
 import subprocess
 import socket
+import pycountry
 
 # Constants
 CONFIG_ROOT = os.path.join(os.path.expanduser("~"), "OpenVPN", "config")
@@ -56,6 +57,18 @@ WAITING_FOR_INTERNET_MODE = False
 NATIVE_IP = get_public_ip()
 
 
+def country_to_alpha2(name: str) -> str | None:
+    """
+    Convert a country name to its ISO 3166-1 alpha-2 code (e.g., 'de', 'us').
+    Returns None if not found.
+    """
+    try:
+        country = pycountry.countries.lookup(name)
+        return country.alpha_2.lower()
+    except LookupError:
+        return None
+
+
 def list_servers(args):
     """Fetch the VPN list page, filter out Russian Federation, sort by ping ascending, and print each .ovpn URL."""
 
@@ -91,6 +104,9 @@ def list_servers(args):
         if args.silent: print(f"Baseline public IP: {NATIVE_IP}")
         os.system(f"title VPN IS DISABLED: {NATIVE_IP}")
 
+    allowed_countries_list = [str(i).lower() for i in args.countries.split(",") if "!" not in str(i)]
+    disallowed_countries_list = [str(i).lower().replace("!","") for i in args.countries.split(",") if "!" in str(i)]
+
     soup = BeautifulSoup(resp.text, "html.parser")
     entries = []
 
@@ -102,7 +118,15 @@ def list_servers(args):
             continue
         country = country_divs[0].get_text(strip=True)
         # Skip Russian Federation
-        if country.lower() == "russian federation":
+
+        filt = True
+        if "*" not in allowed_countries_list:
+            if len(allowed_countries_list) != 0:
+                filt = filt and country_to_alpha2(country) in allowed_countries_list
+            if len(disallowed_countries_list) != 0:
+                filt = filt and country_to_alpha2(country) not in disallowed_countries_list
+
+        if not filt:
             continue
 
         # Extract ping (in ms) from the 4th .list div
@@ -142,7 +166,7 @@ def list_countries(args):
         sys.exit(f"Error fetching server list: {e}")
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    divs = soup.find_all("div", style=lambda s: s and s.startswith("margin: 5px 0"))
+    divs = soup.find_all("div", style=lambda s: s)
 
     if not divs:
         sys.exit("No server entries found. The structure may have changed.")
@@ -303,6 +327,7 @@ def main():
 
     sp = sub.add_parser("list", help="List all .ovpn URLs")
     sp.add_argument("--url", help="Page URL (default freevpn list)")
+    sp.add_argument("--countries", help="Choose what countries to count (ex: US,jp,!RU (USA or Japan but definetely not Russia) or !ge (any except for Germany), * for any)", required=False, default="!RU")
     sp.add_argument("--showping", help="Show the ping of the servers", required=False, default=False)
     sp.add_argument("--silent", help="Print only the user interface prints", required=False, default=False)
     sp.set_defaults(func=list_servers)

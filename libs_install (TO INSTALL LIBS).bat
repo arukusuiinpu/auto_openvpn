@@ -13,6 +13,7 @@ call pip install requests
 call pip install bs4
 call pip install datetime
 call pip install socket
+call pip install pycountry
 
 echo Done!
 
