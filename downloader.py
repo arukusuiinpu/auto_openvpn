@@ -35,7 +35,7 @@ def is_connected(host="8.8.8.8", port=53, timeout=3):
 
 
 IP_SERVICES = [
-    "https://ident.me", # minimal
+    "https://ident.me",  # minimal
     "https://api.ipify.org",  # IPv4 & IPv6
     "https://api4.ipify.org",  # force IPv4 :contentReference[oaicite:1]{index=1}
     "https://ifconfig.me/ip"  # popular
@@ -53,7 +53,65 @@ def get_public_ip():
     return None
 
 
-WAITING_FOR_INTERNET_MODE = False
+from typing import TypeVar
+
+T = TypeVar('T')
+
+
+def write_data(kind, data: T, delimiter: str = ':') -> T:
+    home = os.path.expanduser("~")
+    data_path = os.path.join(home, "OpenVPN", "data.txt")
+
+    kind = str(kind)
+    new_line = f"{kind}{delimiter}{data}"
+
+    try:
+        with open(data_path, "r", encoding="utf-8") as file:
+            lines = file.readlines()
+    except FileNotFoundError:
+        lines = []
+
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith(kind + delimiter):
+            lines[i] = new_line + "\n"
+            updated = True
+            break
+
+    if not updated:
+        lines.append(new_line + "\n")
+
+    with open(data_path, "w", encoding="utf-8") as file:
+        file.writelines(lines)
+
+    return data
+
+
+def read_data(kind, default: T, delimiter: str = ':') -> T:
+    home = os.path.expanduser("~")
+    data_path = os.path.join(home, "OpenVPN", "data.txt")
+
+    kind = str(kind)
+
+    try:
+        with open(data_path, "r", encoding="utf-8") as file:
+            for line in file:
+                if line.startswith(kind + delimiter):
+                    _, value = line.strip().split(delimiter, 1)
+                    # Attempt to cast back to the type of default
+                    try:
+                        return type(default)(value)
+                    except:
+                        return default
+    except FileNotFoundError:
+        pass
+
+    return write_data(kind, default, delimiter)
+
+
+WAITING_FOR_INTERNET_MODE = read_data("WAITING_FOR_INTERNET_MODE", False)
+PAUSED_MODE = False
+
 NATIVE_IP = get_public_ip()
 
 
@@ -73,16 +131,25 @@ def list_servers(args):
     """Fetch the VPN list page, filter out Russian Federation, sort by ping ascending, and print each .ovpn URL."""
 
     global WAITING_FOR_INTERNET_MODE
+    global PAUSED_MODE
     global NATIVE_IP
 
     os.system(f"title NOT WORKING")
 
     url = args.url or "https://ipspeed.info/freevpn_openvpn.php?language=en"
 
+    PAUSED_MODE = False
+    while PAUSED_MODE:
+        PAUSED_MODE = read_data("PAUSED_MODE", False)
+
+        os.system(f"title PAUSED")
+
+        time.sleep(1)
+
     if not is_connected():
         if args.silent: print(
             "It appears either the site was terminated or you have troubles with a steady internet connection... Waiting for a fix...")
-        WAITING_FOR_INTERNET_MODE = True
+        WAITING_FOR_INTERNET_MODE = write_data("WAITING_FOR_INTERNET_MODE", True)
 
     n = 0
     while WAITING_FOR_INTERNET_MODE or n == 0:
@@ -93,7 +160,7 @@ def list_servers(args):
             resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=10)
             resp.raise_for_status()
 
-            WAITING_FOR_INTERNET_MODE = False
+            WAITING_FOR_INTERNET_MODE = write_data("WAITING_FOR_INTERNET_MODE", False)
             break
         except:
             "It appears either the site was terminated or you have troubles with a steady internet connection... Waiting for a fix..."
@@ -105,7 +172,7 @@ def list_servers(args):
         os.system(f"title VPN IS DISABLED: {NATIVE_IP}")
 
     allowed_countries_list = [str(i).lower() for i in args.countries.split(",") if "!" not in str(i)]
-    disallowed_countries_list = [str(i).lower().replace("!","") for i in args.countries.split(",") if "!" in str(i)]
+    disallowed_countries_list = [str(i).lower().replace("!", "") for i in args.countries.split(",") if "!" in str(i)]
 
     soup = BeautifulSoup(resp.text, "html.parser")
     entries = []
@@ -113,11 +180,10 @@ def list_servers(args):
     # Each server entry is in a div with margin style
     for entry in soup.find_all("div", style=lambda s: s):
         # Extract country
-        country_divs = entry.find_all("div", class_="list")
+        country_divs = entry.find_all("p", class_="list")
         if len(country_divs) < 4:
             continue
         country = country_divs[0].get_text(strip=True)
-        # Skip Russian Federation
 
         filt = True
         if "*" not in allowed_countries_list:
@@ -217,6 +283,22 @@ def run_vpn(args):
         sys.exit(f"Error launching OpenVPN: {e}")
 
 
+def pause(args):
+    global PAUSED_MODE
+
+    print("Pausing the VPN...")
+
+    PAUSED_MODE = write_data("PAUSED_MODE", True)
+
+
+def resume(args):
+    global PAUSED_MODE
+
+    print("Continuing the VPN...")
+
+    PAUSED_MODE = write_data("PAUSED_MODE", False)
+
+
 def kill_vpn():
     """Kill all running openvpn.exe processes (brute force)."""
     os.system('taskkill /f /im openvpn.exe >nul 2>&1')
@@ -225,6 +307,16 @@ def kill_vpn():
 def normalize_log_content(log_content):
     """Normalize spaces in log content."""
     return log_content.replace('\x00', '')
+
+
+def blacklist(blacklist_path, url):
+    # with open(blacklist_path, "r+") as bf:
+    #     lines = [i for i in bf.read().split("\n") if datetime.datetime.strptime(i.split("|")[0], "%d.%M.%Y:%H:%M:%S") - datetime.datetime.now() >= ]
+    #     bf.write("\n".join(lines))
+
+    with open(blacklist_path, "a+") as bf:
+        bf.write(datetime.datetime.now().strftime(
+            "%d.%M.%Y:%H:%M:%S") + "|" + url + "\n")
 
 
 def check_loop(args):
@@ -307,6 +399,8 @@ def check_loop(args):
                 with open(flag_path, "w") as f:
                     f.write("false")
 
+                blacklist(blacklist_path, args.url)
+
                 sys.exit(0)
 
             # check for known failure
@@ -314,8 +408,7 @@ def check_loop(args):
                 print(f"VPN connection for {args.basename} failed. Trying next configuration...")
                 os.system(f"title FAILED")
                 # append to blacklist
-                with open(blacklist_path, "a+") as bf:
-                    bf.write(args.url + "\n")
+                blacklist(blacklist_path, args.url)
                 break
 
         time.sleep(1)
@@ -327,7 +420,9 @@ def main():
 
     sp = sub.add_parser("list", help="List all .ovpn URLs")
     sp.add_argument("--url", help="Page URL (default freevpn list)")
-    sp.add_argument("--countries", help="Choose what countries to count (ex: US,jp,!RU (USA or Japan but definetely not Russia) or !ge (any except for Germany), * for any)", required=False, default="!RU")
+    sp.add_argument("--countries",
+                    help="Choose what countries to count (ex: US,jp,!RU (USA or Japan but definetely not Russia) or !ge (any except for Germany), * for any)",
+                    required=False, default="!RU")
     sp.add_argument("--showping", help="Show the ping of the servers", required=False, default=False)
     sp.add_argument("--silent", help="Print only the user interface prints", required=False, default=False)
     sp.set_defaults(func=list_servers)
@@ -355,6 +450,12 @@ def main():
     sp.add_argument("--timestep", help="The timestep either in days (1d), hours (8h), minutes (15m) or seconds (30s)",
                     default="2s", required=False)
     sp.set_defaults(func=check_loop)
+
+    sp = sub.add_parser("pause", help="Pause the VPN")
+    sp.set_defaults(func=pause)
+
+    sp = sub.add_parser("continue", help="Continue the VPN")
+    sp.set_defaults(func=resume)
 
     args = p.parse_args()
     args.func(args)
