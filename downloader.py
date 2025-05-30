@@ -178,9 +178,9 @@ def list_servers(args):
     entries = []
 
     # Each server entry is in a div with margin style
-    for entry in soup.find_all("div", style=lambda s: s):
+    for entry in soup.find_all("div"):
         # Extract country
-        country_divs = entry.find_all("p", class_="list")
+        country_divs = entry.find_all("p")
         if len(country_divs) < 4:
             continue
         country = country_divs[0].get_text(strip=True)
@@ -222,30 +222,22 @@ def list_servers(args):
                 print(url)
 
 
-def list_countries(args):
-    """List available countries and associated .ovpn config URLs."""
-    url = args.url or "https://ipspeed.info/freevpn_openvpn.php?language=en"
-    try:
-        resp = requests.get(url, headers=DEFAULT_HEADERS, timeout=10)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        sys.exit(f"Error fetching server list: {e}")
+def get_country(soup, vpn):
+    for entry in soup.find_all("div"):
+        # Extract country
+        country_divs = entry.find_all("p")
+        if len(country_divs) < 4:
+            continue
+        country = country_divs[0].get_text(strip=True)
 
-    soup = BeautifulSoup(resp.text, "html.parser")
-    divs = soup.find_all("div", style=lambda s: s)
+        links_div = country_divs[1]
+        for a in links_div.find_all("a", href=True):
+            href = a['href']
+            full_url = href if href.startswith("http") else f"https://ipspeed.info{href}"
 
-    if not divs:
-        sys.exit("No server entries found. The structure may have changed.")
-
-    for entry in divs:
-        country_div = entry.find_all("div", class_="list")
-        if len(country_div) >= 2:
-            country = country_div[0].text.strip()
-            link = country_div[1].find("a", href=True)
-            if link and link['href'].lower().endswith(".ovpn"):
-                href = link['href']
-                full_url = href if href.startswith("http") else f"https://ipspeed.info{href}"
-                print(f"{country}: {full_url}")
+            if full_url.endswith(vpn):
+                return country
+    return
 
 
 def download_config(args):
@@ -269,15 +261,17 @@ def download_config(args):
 
 def run_vpn(args):
     """Launch OpenVPN against the given basename."""
+
     basename = args.basename
     cfgpath = os.path.join(CONFIG_ROOT, basename, f"{basename}.ovpn")
     if not os.path.isfile(cfgpath):
         sys.exit(f"Config not found: {cfgpath}")
     try:
-        subprocess.Popen([
+        process = subprocess.Popen([
             OPENVPN_EXE,
             "--config", cfgpath
         ], shell=False)
+        write_data("SUBPROCESS", process)
         print(f"Launched OpenVPN for: {basename}")
     except Exception as e:
         sys.exit(f"Error launching OpenVPN: {e}")
@@ -328,6 +322,7 @@ def check_loop(args):
     On failure, append the URL to blacklist.txt.
     Returns True on success, False on failure.
     """
+
     home = os.path.expanduser("~")
     log_dir = os.path.join(home, "OpenVPN", "log")
     os.makedirs(log_dir, exist_ok=True)
@@ -383,14 +378,21 @@ def check_loop(args):
                     time.sleep(timestep)
                     timer += timestep
 
+                    process = read_data("SUBPROCESS", "None")
+                    if process != "None":
+                        poll = process.poll()
+                        if poll != "None":
+                            break
+
                     # if not is_connected():
                     #     print("The connection was terminated. Reinitializing...")
                     #     break
-                    new_ip = get_public_ip()
-                    if not (new_ip and new_ip != NATIVE_IP):
-                        print("The connection was terminated. Reinitializing...")
-                        os.system(f"title NOT WORKING")
-                        break
+
+                    # new_ip = get_public_ip()
+                    # if not (new_ip and new_ip != NATIVE_IP):
+                    #     print("The connection was terminated. Reinitializing...")
+                    #     os.system(f"title NOT WORKING")
+                    #     break
 
                 kill_vpn()
 
@@ -426,10 +428,6 @@ def main():
     sp.add_argument("--showping", help="Show the ping of the servers", required=False, default=False)
     sp.add_argument("--silent", help="Print only the user interface prints", required=False, default=False)
     sp.set_defaults(func=list_servers)
-
-    sp = sub.add_parser("countries", help="List countries and their .ovpn config URLs")
-    sp.add_argument("--url", help="Page URL (default freevpn list)")
-    sp.set_defaults(func=list_countries)
 
     sp = sub.add_parser("download", help="Download a single .ovpn file")
     sp.add_argument("url", help="Full URL of the .ovpn file")
