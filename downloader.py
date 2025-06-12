@@ -178,9 +178,13 @@ def list_servers(args):
     entries = []
 
     # Each server entry is in a div with margin style
-    for entry in soup.find_all("div", style=lambda s: s):
+    for entry in soup.find_all("div"):
+
+        # print([i for i in entry])
+        # print(entry.find_all("span"))
+
         # Extract country
-        country_divs = entry.find_all("p", class_="list")
+        country_divs = entry.find_all("p") + entry.find_all("span")
         if len(country_divs) < 4:
             continue
         country = country_divs[0].get_text(strip=True)
@@ -205,7 +209,7 @@ def list_servers(args):
 
         # Extract all .ovpn links
         links_div = country_divs[1]
-        for a in links_div.find_all("a", href=True):
+        for a in links_div.find_all("a"):
             href = a['href']
             full_url = href if href.startswith("http") else f"https://ipspeed.info{href}"
             entries.append((country, ping, full_url))
