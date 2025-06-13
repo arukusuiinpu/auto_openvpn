@@ -390,11 +390,11 @@ def check_loop(args):
                     # if not is_connected():
                     #     print("The connection was terminated. Reinitializing...")
                     #     break
-                    new_ip = get_public_ip()
-                    if not (new_ip and new_ip != NATIVE_IP):
-                        print("The connection was terminated. Reinitializing...")
-                        os.system(f"title NOT WORKING")
-                        break
+                    # new_ip = get_public_ip()
+                    # if not (new_ip and new_ip != NATIVE_IP):
+                    #     print("The connection was terminated. Reinitializing...")
+                    #     os.system(f"title NOT WORKING")
+                    #     break
 
                 kill_vpn()
 
