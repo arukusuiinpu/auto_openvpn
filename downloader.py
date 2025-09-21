@@ -178,13 +178,13 @@ def list_servers(args):
     entries = []
 
     # Each server entry is in a div with margin style
-    for entry in soup.find_all("div"):
+    for entry in soup.find_all("div") + soup.find("tbody").find_all("tr"):
 
         # print([i for i in entry])
         # print(entry.find_all("span"))
 
         # Extract country
-        country_divs = entry.find_all("p") + entry.find_all("span")
+        country_divs = entry.find_all("p") + entry.find_all("span") + entry.find_all("td")
         if len(country_divs) < 4:
             continue
         country = country_divs[0].get_text(strip=True)
